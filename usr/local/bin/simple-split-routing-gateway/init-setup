@@ -1,0 +1,64 @@
+#!/bin/bash
+set -euo pipefail
+
+CONFIG_FILE="/var/lib/simple-split-routing-gateway/config.conf"
+[[ -f "$CONFIG_FILE" ]] || { echo "Missing config: $CONFIG_FILE"; exit 1; }
+source "$CONFIG_FILE"
+
+source /usr/local/bin/simple-split-routing-gateway/common.sh
+
+enable_ip_forwarding() {
+  grep -q '^net.ipv4.ip_forward=1' /etc/sysctl.conf || echo 'net.ipv4.ip_forward=1' >> /etc/sysctl.conf
+  sysctl -w net.ipv4.ip_forward=1
+}
+
+install_nftables() {
+  if ! command -v nft &>/dev/null; then
+    log "Installing nftables..."
+    apt update && apt install -y nftables
+  fi
+}
+
+write_nftables_config() {
+  cat > /etc/nftables.conf <<EOF
+#!/usr/sbin/nft -f
+flush ruleset
+table ip nat {
+  chain postrouting {
+    type nat hook postrouting priority 100; policy accept;
+    oifname "$INTERFACE" masquerade
+  }
+}
+table ip filter {
+  chain forward {
+    type filter hook forward priority 0; policy drop;
+    ct state established,related accept
+    iifname "$INTERFACE" oifname "$INTERFACE" accept
+    oifname "$INTERFACE" iifname "$INTERFACE" accept
+  }
+}
+EOF
+  systemctl enable nftables
+  systemctl restart nftables
+}
+
+resolve_and_set_routes() {
+  resolve_domains_and_apply_routes \
+    'ip route replace' \
+    "/var/lib/simple-split-routing-gateway/domain-ip-cache" \
+    "$DOMAIN_FILE" \
+    "$SPECIAL_GW" \
+    "$INTERFACE" \
+    "Setting initial "
+}
+
+main() {
+  log "Running initial gateway setup (one-time tasks)"
+  enable_ip_forwarding
+  install_nftables
+  write_nftables_config
+  resolve_and_set_routes
+  log "Initial setup complete. You can now enable and start the route-refresh service/timer."
+}
+
+main "$@"

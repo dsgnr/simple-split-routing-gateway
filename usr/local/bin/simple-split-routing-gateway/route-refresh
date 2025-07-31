@@ -1,0 +1,59 @@
+#!/bin/bash
+set -euo pipefail
+
+CONFIG_FILE="/var/lib/simple-split-routing-gateway/config.conf"
+[[ -f "$CONFIG_FILE" ]] || { echo "Missing config: $CONFIG_FILE"; exit 1; }
+source "$CONFIG_FILE"
+
+source /usr/local/bin/simple-split-routing-gateway/common.sh
+
+run_or_echo() {
+  [[ "${DRY_RUN:-false}" == "true" ]] && echo "[dry-run] $*" || eval "$@"
+}
+
+set_default_route() {
+  if ! ping -c 1 -W 1 "$DEFAULT_GW" &>/dev/null; then
+    log "Default gateway $DEFAULT_GW unreachable. Exiting."
+    exit 1
+  fi
+  log "Setting default route via $DEFAULT_GW"
+  run_or_echo "ip route replace default via $DEFAULT_GW dev $INTERFACE"
+}
+
+apply_cached_routes() {
+  CACHE_FILE="/var/lib/simple-split-routing-gateway/domain-ip-cache"
+  if [[ -f "$CACHE_FILE" ]]; then
+    log "Applying cached routes from $CACHE_FILE..."
+    while IFS= read -r line; do
+      DOMAIN="${line%%:*}"
+      IPs="${line#*:}"
+      for IP in $IPs; do
+        [[ -z "$IP" ]] && continue
+        log "[cache] Ensuring route to $IP for $DOMAIN"
+        run_or_echo "ip route replace $IP via $SPECIAL_GW dev $INTERFACE"
+      done
+    done < "$CACHE_FILE"
+  else
+    log "No domain IP cache found, skipping instant route load."
+  fi
+}
+
+refresh_domain_routes() {
+  resolve_domains_and_apply_routes \
+    'run_or_echo "ip route replace"' \
+    "/var/lib/simple-split-routing-gateway/domain-ip-cache" \
+    "$DOMAIN_FILE" \
+    "$SPECIAL_GW" \
+    "$INTERFACE" \
+    "Refreshing "
+}
+
+main() {
+  log "Starting gateway route refresh"
+  set_default_route
+  apply_cached_routes
+  refresh_domain_routes
+  log "Gateway route refresh complete."
+}
+
+main "$@"

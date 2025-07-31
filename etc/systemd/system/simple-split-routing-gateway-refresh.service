@@ -1,0 +1,11 @@
+[Unit]
+Description=Simple-Split Routing Gateway: Refresh domain routes
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/simple-split-routing-gateway/route-refresh
+
+[Install]
+WantedBy=multi-user.target

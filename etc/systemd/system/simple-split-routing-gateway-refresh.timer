@@ -1,0 +1,10 @@
+[Unit]
+Simple-Split Routing Gateway: Refresh domain routes every 4 hours and at boot
+
+[Timer]
+OnBootSec=10sec
+OnUnitActiveSec=4h
+Unit=simple-split-routing-gateway-refresh.service
+
+[Install]
+WantedBy=timers.target
